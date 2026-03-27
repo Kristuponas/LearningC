@@ -11,24 +11,24 @@
 #define EXT_ERR_BASE_PATH 2
 #define EXT_ERR_INIT_INOTIFY 3
 #define EXT_ERR_ADD_WATCH 4
+#define EXT_ERR_READ_INOTIFY 5
 
-typedef int8_t i8;
-typedef int16_t i16;
 typedef uint32_t u32;
 
-i8 IeventQueue = -1;
-i8 IeventStatus = -1;
+int IeventQueue = -1;
+int IeventStatus = -1;
 
 int main(int argc, char** argv) {
     char *basePath = NULL;
     char *token = NULL; 
+    char *notificationMessage = NULL;
 
     char buffer[4096];
-    i16 readLength;
+    ssize_t readLength;
 
     const struct inotify_event* watchEvent;
 
-    const u32 watchMask = IN_CREATE | IN_DELETE | IN_ACCESS | IN_CLOSE_WRITE | IN MODIFY | IN_MOVE_SELF;
+    const u32 watchMask = IN_CREATE | IN_DELETE | IN_ACCESS | IN_CLOSE_WRITE | IN_MODIFY | IN_MOVE_SELF;
 
     if (argc < 2) {
         fprintf(stderr, "Error - too few arguments. USAGE: watcher PATH");
@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
 
     if (basePath == NULL) {
         fprintf(stderr, "Error - base path not defined!\n");
-        exit(EXT_ERR_BASE_BATH);
+        exit(EXT_ERR_BASE_PATH);
     }
 
     IeventQueue = inotify_init();
@@ -63,16 +63,50 @@ int main(int argc, char** argv) {
     }
 
     while (1) {
-        printf("Waiting for ievent")
+        printf("Waiting for ievent.\n");
     
         readLength = read(IeventQueue, buffer, sizeof(buffer));
+        if (readLength == -1) {
+            fprintf(stderr, "Error - reading from inotfiy instance!\n");
+            exit(EXT_ERR_READ_INOTIFY);
+        }
 
-        for (char *bufferPointer = buffer; bufferPointer < buffer + readLength; bufferPointer += sizeof(struct inotify_event + watchEvent->len)) {
+        for (char *bufferPointer = buffer; bufferPointer < buffer + readLength; bufferPointer += sizeof(struct inotify_event) + watchEvent->len) {
             
+            notificationMessage = NULL;
+            watchEvent = (const struct inotify_event *) bufferPointer;
+
+            if (watchEvent->mask & IN_CREATE) {
+                notificationMessage = "File created.\n";
+            }
+
+            if (watchEvent->mask & IN_DELETE) {
+                notificationMessage = "File deleted.\n";
+            }
+
+            if (watchEvent->mask & IN_ACCESS) {
+                notificationMessage = "File accessed.\n";
+            }
+
+            if (watchEvent->mask & IN_CLOSE_WRITE) {
+                notificationMessage = "File written and closed.\n";
+            }
+
+            if (watchEvent->mask & IN_MODIFY) {
+                notificationMessage = "File modified.\n";
+            }
+
+            if (watchEvent->mask & IN_MOVE_SELF) {
+                notificationMessage = "File moved.\n";
+            }
+
+            if (notificationMessage == NULL) {
+                continue;
+            }
+
+            printf("%s\n", notificationMessage);
         }
     }
-    
-
     exit(EXT_SUCCESS);
 }
 
