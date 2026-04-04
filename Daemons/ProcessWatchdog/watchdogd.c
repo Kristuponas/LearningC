@@ -5,7 +5,6 @@
 #include <stdbool.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <dirent.h>
 #include <stdint.h>
 #include <signal.h>
 #include <unistd.h>
@@ -17,10 +16,8 @@
 #define EXT_ERR_FOPEN 4
 #define EXT_ERR_FCLOSE 5
 #define EXT_ERR_FORK 6
-#define EXT_ERR_READLINK 7
-#define EXT_ERR_EXECVP 8
+#define EXT_ERR_EXECVP 7
 
-typedef int8_t i8;
 typedef uint8_t u8;
 typedef uint32_t u32;
 
@@ -55,18 +52,9 @@ int main(int argc, char** argv)
 
     init_service();
 
-    FILE *fp; 
-    FILE *sp;   // Stats file pointer
-
     char line[128];
     char command[256];
     char path[128];
-
-    char stats[128];
-    char label[64];
-    char value[64];
-
-    char executable_path[256];
 
     u8 watch_count = argc - 1;
     WatchedProcess watchlist[10];
@@ -75,6 +63,13 @@ int main(int argc, char** argv)
     {
         strncpy(watchlist[i].command, argv[i + 1], sizeof(watchlist[i].command) - 1);
         watchlist[i].command[sizeof(watchlist[i].command) - 1] = '\0';
+
+        char *basename = strrchr(argv[i + 1], '/');
+        if (basename != NULL)
+            strncpy(watchlist[i].name, basename + 1, sizeof(watchlist[i].name) - 1); // For program not found in $PATH
+        else 
+            strncpy(watchlist[i].name, argv[i + 1], sizeof(watchlist[i].name) - 1); // For program found in $PATH
+        
         watchlist[i].pid = 0;
         watchlist[i].is_running = false;
     }
@@ -83,11 +78,15 @@ int main(int argc, char** argv)
     {
         for (int i = 0; i < watch_count; i++) 
         {
+            char stats[128];
+            char label[64];
+            char value[64];
+
             bool was_running = watchlist[i].is_running;
             printf("Was_running: %d, is_running: %d\n", was_running, watchlist[i].is_running);
-            snprintf(command, sizeof(command), "pgrep -x %s 2>/dev/null", watchlist[i].command);
+            snprintf(command, sizeof(command), "pgrep -x %s 2>/dev/null", watchlist[i].name);
 
-            fp = popen(command, "r");
+            FILE *fp = popen(command, "r");
             if (fp == NULL) 
             {
                 fprintf(stderr, "Error - popen failed");
@@ -103,7 +102,7 @@ int main(int argc, char** argv)
                 snprintf(path, sizeof(path), "/proc/%s/status", line);
                 printf("Trying to open: '%s'\n", path);
 
-                sp = fopen(path, "r");
+                FILE *sp = fopen(path, "r");
                 if (sp == NULL)
                 {
                     fprintf(stderr, "Error - fopen error");
@@ -143,7 +142,7 @@ int main(int argc, char** argv)
             if (was_running && !watchlist[i].is_running)
             {
                 printf("Process: %s (PID: %u) died.\n", watchlist[i].name, watchlist[i].pid);
-                printf("Resetarting process...\n");
+                printf("Restarting process...\n");
 
                 pid_t child_pid = fork();
                 if (child_pid == -1)
@@ -153,23 +152,14 @@ int main(int argc, char** argv)
                 }
                 else if (child_pid == 0)
                 {
-                    snprintf(executable_path, sizeof(executable_path), "/proc/%d/exe", watchlist[i].pid);
-                    
-                    ssize_t len = readlink(executable_path, executable_path, sizeof(executable_path) - 1);
-                    if (len == -1) {
-                        fprintf(stderr, "Error - readlink failed to get executable path\n");
-                        exit(EXT_ERR_READLINK);
-                    }
+                    setsid(); // Creating a session for child, the process then survives watchdogd death
 
-                    executable_path[len] = '\0';
+                    char *args[] = { watchlist[i].command, NULL };
+                    printf("Command: %s\n", watchlist[i].command);
 
-                    char *args[] = { executable_path, NULL };
-                    i8 status_code = execvp(executable_path, args);
-                    if (status_code == -1)
-                    {
-                        fprintf(stderr, "Error - execvp did not terminate correctly\n");
-                        exit(EXT_ERR_EXECVP);
-                    }
+                    execvp(watchlist[i].command, args);
+                    fprintf(stderr, "Error - execvp failed\n");
+                    exit(EXT_ERR_EXECVP);
                 } 
                 else
                 {
