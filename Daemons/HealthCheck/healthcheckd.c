@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/select.h>
+#include <sys/time.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -101,20 +102,60 @@ static bool check_host(HostInfo *hostInfo)
             exit(EXT_ERR_FCNTL);
         }
 
-        int conn = connect(sockfd, tmp->ai_addr, sizeof(tmp->addrlen));
+        int conn = connect(sockfd, tmp->ai_addr, tmp->ai_addrlen);
         if (conn == -1 && errno != EINPROGRESS) // Connection started, not done yet
         {
             fprintf(stderr, "Error - connect failure\n");
             close(sockfd);
             exit(EXT_ERR_CONNECT);
         }
-        
+
+        fd_set writefds;
+        FD_ZERO(&writefds);
+        FD_SET(sockfd, &writefds);
+
+        struct timeval timeout;
+        timeout.tv_sec = 3;
+        timeout.tv_usec = 0;
+
+        int retval = select(sockfd + 1, NULL, &writefds, NULL, &timeout);
+        if (retval == -1)
+        {
+            fprintf(stderr, "Error - select failure\n");
+            close(sockfd);
+            return false;
+        }
+        else if (retval == 0)
+        {
+            fprintf(stderr, "Error - timeout, host unreachable\n");
+            close(sockfd);
+            return false;
+        }
+
+        int error = 0;
+        socklen_t errlen = sizeof(error);
+        getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &error, &errlen);
+
+        if (error != 0)
+        {
+            fprintf(stderr, "Error - connection failed (getsockopt)\n");
+            close(sockfd);
+            return false;
+        }
         
         close(sockfd);
+        
+        if (error == 0)
+        {
+            printf("\tConnection successful\n\n");
+            freeaddrinfo(result);
+            return true;
+        }
+
         tmp = tmp->ai_next;
     }
-
     freeaddrinfo(result);
+    return false;
 }
 
 int main (int argc, char** argv)
