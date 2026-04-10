@@ -35,6 +35,7 @@ volatile int terminate = false;
 
 static void handle_termination(int signum)
 {
+    (void)signum;
     terminate = true;
 }
 
@@ -190,7 +191,8 @@ int main (int argc, char** argv)
     {
         for (int i = 0; i < hosts; i++)
             check_host(&hostInfo[i]);
-	    sleep(SLEEP_TIME);
+	    
+        sleep(SLEEP_TIME);
     }
     exit(EXT_SUCCESS);
 }

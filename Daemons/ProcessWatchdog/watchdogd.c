@@ -33,6 +33,7 @@ volatile int terminate = false;
 
 static void handle_termination(int signum)
 {
+    (void)signum;
     terminate = true;
 }
 
@@ -52,9 +53,9 @@ int main(int argc, char** argv)
 
     init_service();
 
-    char line[128];
+    char line[16];
     char command[256];
-    char path[128];
+    char path[256];
 
     u8 watch_count = argc - 1;
     WatchedProcess watchlist[10];
