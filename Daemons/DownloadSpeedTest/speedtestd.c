@@ -23,20 +23,6 @@ typedef struct {
     const char *label;
 } SpeedRating;
 
-volatile bool terminate = false;
-
-static void handle_termination(int signum)
-{
-    (void)signum;
-    terminate = true;
-}
-
-static void init_service()
-{
-    signal(SIGINT, handle_termination);
-    signal(SIGTERM, handle_termination);
-}
-
 static size_t discard_data (void *ptr, size_t size, size_t nmemb, void *userdata)
 {
     (void)ptr;
@@ -71,8 +57,6 @@ int main(int argc, char **argv)
         fprintf(stderr, "Usage: %s file size MB\n", argv[0]);
         exit(EXT_ERR_USAGE);
     }
-
-    init_service();
 
     int size = atoi(argv[1]);
     if (size <= 0)
