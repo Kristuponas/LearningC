@@ -7,24 +7,21 @@
 
 #define SLEEP_TIME 10
 
-// Based on: https://www.thinkbroadband.com/download
-// SMALL FILE = 10MB || 20 MB, for 20MB time doubles
-#define SMALL_FILE_VERY_SLOW 40     //  40s @ 2 Mbps 
-#define SMALL_FILE_SLOW 10          //  10s @ 8 Mbps
-#define SMALL_FILE_NORMAL 3         //   3s @ 30 Mbps
-#define SMALL_FILE_FAST 1.5         // 1.5s @ 60 Mbps
-#define SMALL_FILE_VERY_FAST 0.7    // 0.7s @ 120 Mbps
-
-// MEDIUM FILE = 50MB || 100 MB, for 100MB time doubles
-#define MEDIUM_FILE_VERY_SLOW 240   // 240s @ 2 Mbps 
-#define MEDIUM_FILE_SLOW 60         //  60s @ 8 Mbps
-#define MEDIUM_FILE_NORMAL 14       //  14s @ 30 Mbps
-#define MEDIUM_FILE_FAST 7          //   7s @ 60 Mbps
-#define MEDIUM_FILE_VERY_FAST 4     //   4s @ 120 Mbps
+// https://speed.cloudflare.com/ 
+// Speed thresholds in MB/s
+#define SPEED_VERY_FAST 50.0
+#define SPEED_FAST      12.5
+#define SPEED_MEDIUM     6.25
+#define SPEED_SLOW       1.25
 
 // Exit codes
 #define EXT_ERR_USAGE 1
 #define EXT_ERR_CURL_EASY_PERFORM 2
+
+typedef struct {
+    double threshold;
+    const char *label;
+} SpeedRating;
 
 volatile bool terminate = false;
 
@@ -47,25 +44,45 @@ static size_t discard_data (void *ptr, size_t size, size_t nmemb, void *userdata
     return size * nmemb;
 }
 
+static void print_speed_rating(double total_time, int size_mb)
+{
+    SpeedRating ratings[] = {
+        { (double)size_mb / SPEED_VERY_FAST, "Very fast"  },
+        { (double)size_mb / SPEED_FAST,      "Fast"       },
+        { (double)size_mb / SPEED_MEDIUM,    "Medium"     },
+        { (double)size_mb / SPEED_SLOW,      "Slow"       },
+        { __DBL_MAX__,                       "Very slow"  },
+    };
+
+    for (int i = 0; i < 5; i++)
+    {
+        if (total_time <= ratings[i].threshold)
+        {
+            printf("Download speed: %s\n", ratings[i].label);
+            return;
+        }
+    }
+}
+
 int main(int argc, char **argv)
 {
     if (argc != 2)
     {
-        fprintf(stderr, "Usage: %s file size MB (10 | 20 | 50 | 100)\n", argv[0]);
+        fprintf(stderr, "Usage: %s file size MB\n", argv[0]);
         exit(EXT_ERR_USAGE);
     }
 
     init_service();
 
     int size = atoi(argv[1]);
-    if (size != 10 && size != 20 && size != 50 && size != 100)
+    if (size <= 0)
     {
-        fprintf(stderr, "Error - invalid size, use one of these: 10, 20, 50, 100\n");
+        fprintf(stderr, "Error - invalid size\n");
         exit(EXT_ERR_USAGE);
     }
 
     char url[128];
-    snprintf(url, sizeof(url), "http://ipv4.download.thinkbroadband.com/%sMB.zip", argv[1]);
+    snprintf(url, sizeof(url), "https://speed.cloudflare.com/__down?bytes=%lld", (long long)size * 1024 * 1024);
 
     printf("URL: %s\n", url);
 
@@ -79,15 +96,45 @@ int main(int argc, char **argv)
     {
         curl_easy_setopt(curl, CURLOPT_URL, url);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, discard_data);
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+        curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+        curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0");
 
         res = curl_easy_perform(curl);
+
+        printf("CURLcode: %d\n", res);
         if (res != CURLE_OK)
         {
             fprintf(stderr, "Error - curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
             exit(EXT_ERR_CURL_EASY_PERFORM);
         }
 
+        curl_off_t speed_download;
+        curl_off_t bytes_downloaded;
+        double total_time;
+        long http_code = 0;
+
+        curl_easy_getinfo(curl, CURLINFO_SPEED_DOWNLOAD_T, &speed_download);
+        curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME, &total_time);
+        curl_easy_getinfo(curl, CURLINFO_SIZE_DOWNLOAD_T, &bytes_downloaded);
+        
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+        if (http_code != 200)
+        {
+            fprintf(stderr, "Error - HTTP %ld\n", http_code);
+            curl_easy_cleanup(curl);
+            curl_global_cleanup();
+            exit(EXT_ERR_CURL_EASY_PERFORM);
+        }
+
+        printf("Speed: %.2f MB/s\n", (double)speed_download / 1024 / 1024);
+        printf("Time: %.2f seconds\n", total_time);
+        printf("Downloaded: %.2f MB\n", (double)bytes_downloaded / 1024 / 1024);
+
         curl_easy_cleanup(curl);
+
+        print_speed_rating(total_time, size);
     }
 
     curl_global_cleanup();

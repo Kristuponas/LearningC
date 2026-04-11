@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -g
-LIBS = -lcurl
+LIBS = -lcurl -lssl -lcrypto
 
 TARGET = speedtestd
 SRC = speedtestd.c
